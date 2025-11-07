@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Calculadora de IMC com Histórico</title>
+<style>
+  :root{--bg:#f5f7fb;--card:#ffffff;--accent:#2b6cb0;--muted:#6b7280;}
+  *{box-sizing:border-box;font-family:Arial, Helvetica, sans-serif}
+  body{margin:0;background:var(--bg);color:#0f1724;padding:24px}
+  .container{max-width:900px;margin:0 auto}
+  header{display:flex;align-items:center;gap:16px;margin-bottom:18px}
+  h1{font-size:20px;margin:0}
+  .card{background:var(--card);border-radius:10px;padding:18px;box-shadow:0 6px 18px rgba(15,23,36,0.06);margin-bottom:18px}
+  form{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end}
+  label{font-size:13px;color:var(--muted)}
+  input[type="number"], input[type="text"], input[type="date"]{width:100%;padding:10px;border-radius:6px;border:1px solid #d1d5db}
+  .controls{display:flex;gap:8px;flex-wrap:wrap}
+  button{padding:10px 12px;border:0;border-radius:8px;cursor:pointer;background:var(--accent);color:#fff}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid #cfe0fb}
+  .result{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  .badge{padding:8px 12px;border-radius:999px;background:#e6f0ff;color:var(--accent);font-weight:600}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+  th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}
+  .small{font-size:13px;color:var(--muted)}
+  .actions button{margin-right:6px;padding:6px 8px;border-radius:6px}
+  .danger{background:#ef4444}
+  .success{background:#16a34a}
+  .center{display:flex;justify-content:center}
+  .help{font-size:13px;color:var(--muted);margin-top:6px}
+  @media(max-width:600px){header{flex-direction:column;align-items:flex-start}form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Calculadora de IMC com Histórico</h1>
+      <div class="small">Projeto Integrador — Programação Web</div>
+    </header>
+
+    <section class="card" aria-labelledby="calc-title">
+      <h2 id="calc-title" style="margin-top:0;font-size:16px">Calcule seu IMC</h2>
+
+      <form id="imc-form" autocomplete="off">
+        <div>
+          <label for="peso">Peso (kg)</label>
+          <input id="peso" type="number" step="0.1" min="0" required>
+        </div>
+        <div>
+          <label for="altura">Altura (m) — ex: 1.75</label>
+          <input id="altura" type="number" step="0.01" min="0" required>
+        </div>
+        <div>
+          <label for="data">Data</label>
+          <input id="data" type="date">
+        </div>
+        <div style="align-self:start" class="controls">
+          <button id="calcular" type="submit">Calcular e Salvar</button>
+          <button id="limpar-form" type="button" class="ghost">Limpar</button>
+        </div>
+      </form>
+
+      <div id="resultado" class="result" aria-live="polite" style="display:none">
+        <div>
+          <div class="small">IMC</div>
+          <div class="badge" id="imc-valor">--</div>
+        </div>
+        <div>
+          <div class="small">Classificação</div>
+          <div id="imc-class">--</div>
+        </div>
+        <div style="margin-left:auto" class="small">Último registro: <span id="ultimo-data">--</span></div>
+      </div>
+
+      <div class="help">Preencha peso e altura e clique em "Calcular e Salvar". O histórico é salvo apenas no seu navegador.</div>
+    </section>
+
+    <section class="card" aria-labelledby="hist-title">
+      <h2 id="hist-title" style="margin-top:0;font-size:16px">Histórico</h2>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button id="export-csv" class="ghost">Exportar CSV</button>
+        <button id="clear-history" class="ghost">Limpar Histórico</button>
+      </div>
+
+      <div id="history-wrap">
+        <table id="history-table" aria-describedby="hist-title">
+          <thead>
+            <tr><th>Data</th><th>Peso (kg)</th><th>Altura (m)</th><th>IMC</th><th>Classificação</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+
+      <div id="no-items" class="small center" style="padding:16px">Nenhum registro ainda.</div>
+    </section>
+  </div>
+
+<script>
+(() => {
+  const form = document.getElementById('imc-form');
+  const pesoEl = document.getElementById('peso');
+  const alturaEl = document.getElementById('altura');
+  const dataEl = document.getElementById('data');
+  const resultado = document.getElementById('resultado');
+  const imcValor = document.getElementById('imc-valor');
+  const imcClass = document.getElementById('imc-class');
+  const ultimoData = document.getElementById('ultimo-data');
+  const historyBody = document.getElementById('history-body');
+  const noItems = document.getElementById('no-items');
+  const exportBtn = document.getElementById('export-csv');
+  const clearBtn = document.getElementById('clear-history');
+  const limparFormBtn = document.getElementById('limpar-form');
+
+  const STORAGE_KEY = 'imc_history_v1';
+
+  function getTodayISO(){
+    const d = new Date();
+    const pad = n=>String(n).padStart(2,'0');
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  }
+  dataEl.value = getTodayISO();
+
+  function loadHistory(){
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }
+  function saveHistory(list){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  }
+  function formatNumber(num){
+    return Number(num).toFixed(2);
+  }
+
+  function classify(imc){
+    if(imc < 18.5) return 'Abaixo do peso';
+    if(imc < 25) return 'Normal';
+    if(imc < 30) return 'Sobrepeso';
+    if(imc < 35) return 'Obesidade I';
+    if(imc < 40) return 'Obesidade II';
+    return 'Obesidade III';
+  }
+
+  function renderHistory(){
+    const history = loadHistory();
+    historyBody.innerHTML = '';
+    if(history.length === 0){
+      noItems.style.display = 'block';
+      document.getElementById('history-table').style.display = 'none';
+      return;
+    }
+    noItems.style.display = 'none';
+    document.getElementById('history-table').style.display = 'table';
+    history.slice().reverse().forEach((item, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${item.date}</td>
+        <td>${formatNumber(item.peso)}</td>
+        <td>${formatNumber(item.altura)}</td>
+        <td>${formatNumber(item.imc)}</td>
+        <td>${item.class}</td>
+        <td class="actions">
+          <button data-index="${history.length-1-idx}" class="edit">Editar</button>
+          <button data-index="${history.length-1-idx}" class="delete danger">Excluir</button>
+        </td>`;
+      historyBody.appendChild(tr);
+    });
+    const last = history[history.length-1];
+    if(last){
+      resultado.style.display = 'flex';
+      imcValor.textContent = formatNumber(last.imc);
+      imcClass.textContent = last.class;
+      ultimoData.textContent = last.date;
+    }
+  }
+
+  function addRecord(peso, altura, date){
+    const imc = peso / (altura * altura);
+    const record = {peso: Number(peso), altura: Number(altura), date, imc: Number(imc), class: classify(imc)};
+    const history = loadHistory();
+    history.push(record);
+    saveHistory(history);
+    renderHistory();
+  }
+
+  function updateRecord(index, peso, altura, date){
+    const history = loadHistory();
+    if(index<0 || index>=history.length) return;
+    const imc = peso / (altura * altura);
+    history[index] = {peso: Number(peso), altura: Number(altura), date, imc: Number(imc), class: classify(imc)};
+    saveHistory(history);
+    renderHistory();
+  }
+
+  function deleteRecord(index){
+    const history = loadHistory();
+    history.splice(index,1);
+    saveHistory(history);
+    renderHistory();
+  }
+
+  // submit (calcular e salvar)
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const peso = parseFloat(pesoEl.value);
+    const altura = parseFloat(alturaEl.value);
+    const date = dataEl.value || getTodayISO();
+    if(!peso || !altura || peso <= 0 || altura <=0){
+      alert('Informe peso e altura válidos.');
+      return;
+    }
+    addRecord(peso, altura, date);
+    form.reset();
+    dataEl.value = getTodayISO();
+  });
+
+  // limpar form
+  limparFormBtn.addEventListener('click', () => {
+    form.reset();
+    dataEl.value = getTodayISO();
+  });
+
+  // click em editar/excluir (delegation)
+  historyBody.addEventListener('click', (e) => {
+    if(e.target.matches('button.edit')){
+      const idx = Number(e.target.getAttribute('data-index'));
+      const history = loadHistory();
+      const rec = history[idx];
+      if(!rec) return;
+      // preenche form para edição: armazenamos índice temporariamente
+      pesoEl.value = rec.peso;
+      alturaEl.value = rec.altura;
+      dataEl.value = rec.date;
+      // muda botão submit para salvar edição
+      const submitBtn = document.getElementById('calcular');
+      submitBtn.textContent = 'Salvar Alteração';
+      submitBtn.dataset.editIndex = idx;
+      // scroll to form
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+    if(e.target.matches('button.delete')){
+      const idx = Number(e.target.getAttribute('data-index'));
+      if(confirm('Deseja excluir este registro?')) {
+        deleteRecord(idx);
+      }
+    }
+  });
+
+  // intercept submit to handle edit mode
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const submitBtn = document.getElementById('calcular');
+    const editIndex = submitBtn.dataset.editIndex;
+    const peso = parseFloat(pesoEl.value);
+    const altura = parseFloat(alturaEl.value);
+    const date = dataEl.value || getTodayISO();
+    if(!peso || !altura || peso <= 0 || altura <=0){
+      alert('Informe peso e altura válidos.');
+      return;
+    }
+    if(editIndex !== undefined && editIndex !== null && submitBtn.dataset.editIndex !== ''){
+      updateRecord(Number(editIndex), peso, altura, date);
+      // reset edit state
+      submitBtn.textContent = 'Calcular e Salvar';
+      delete submitBtn.dataset.editIndex;
+      form.reset();
+      dataEl.value = getTodayISO();
+      return;
+    }
+    // caso não esteja em edição, já tratado no outro listener — chamamos addRecord:
+    addRecord(peso, altura, date);
+    form.reset();
+    dataEl.value = getTodayISO();
+  }, {capture:false});
+
+  // export CSV
+  exportBtn.addEventListener('click', () => {
+    const history = loadHistory();
+    if(history.length === 0){ alert('Nenhum registro para exportar.'); return; }
+    const header = ['Data','Peso(kg)','Altura(m)','IMC','Classificação'];
+    const rows = history.map(r => [r.date, r.peso, r.altura, r.imc, r.class]);
+    const csv = [header, ...rows].map(r => r.map(field => `"${String(field).replace(/"/g,'""')}"`).join(',')).join('\\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'imc_historico.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  // clear history
+  clearBtn.addEventListener('click', () => {
+    if(confirm('Deseja realmente limpar todo o histórico? Esta ação não pode ser desfeita.')){
+      localStorage.removeItem(STORAGE_KEY);
+      renderHistory();
+    }
+  });
+
+  // inicializar
+  renderHistory();
+
+})();
+</script>
+</body>
+</html>
